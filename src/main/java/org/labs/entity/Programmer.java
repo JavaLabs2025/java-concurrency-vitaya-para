@@ -3,6 +3,9 @@ package org.labs.entity;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class Programmer implements Runnable {
     private final int id;
@@ -23,6 +26,8 @@ public class Programmer implements Runnable {
     private final long minTime2Think = 1;
     private final long maxTime2Think = 5;
 
+    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
     public Programmer(SpoonPair spoon, Table table) {
         this.spoon = spoon;
         this.table = table;
@@ -39,23 +44,49 @@ public class Programmer implements Runnable {
     public void run() {
         try {
             while (isRunning.get()) {
-                    synchronized (portionMonitor) {
-                        while ( ! hasPortion  && isRunning.get()) {
-                            this.table.requestPortion(this);
-                            portionMonitor.wait();
+                CountDownLatch latch = new CountDownLatch(2);
+
+                executor.submit(() -> {
+                    try {
+                        synchronized (portionMonitor) {
+                            while ( ! hasPortion && isRunning.get()) {
+                                this.table.requestPortion(this);
+                                portionMonitor.wait();
+                            }
                         }
-                        if ( ! isRunning.get()) {
-                            return;
-                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        latch.countDown();
                     }
-                    this.takeSpoon();
-                    this.eat();
-                    this.putSpoon();
-                    discuss();
+                });
+
+                executor.submit(() -> {
+                    try {
+                        discuss();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+
+                latch.await();
+
+                if (!isRunning.get()) {
+                    executor.shutdown();
+                    return;
+                }
+
+                this.takeSpoon();
+                this.eat();
+                this.putSpoon();
             }
-        }
-        catch (InterruptedException e) {
+        } catch (InterruptedException e) {
+            executor.shutdown();
             throw new RuntimeException(e);
+        } finally {
+            executor.shutdown();
         }
     }
 

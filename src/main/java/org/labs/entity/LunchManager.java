@@ -13,7 +13,7 @@ public class LunchManager {
 
     public LunchManager(int programmers, int spoons, int waiters) {
         this.table = new Table(programmers, spoons, waiters);
-        exec = Executors.newFixedThreadPool(programmers + waiters);
+        exec = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     public LunchManager start(int totalPortions) {
